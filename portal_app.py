@@ -134,31 +134,45 @@ def get_bil_data():
         filters = request.get_json ().get ('filters', {})
 
         # --- Bygg Athena SQL-spørring (Pre-filtering) ---
-        where_clauses = [f"date(dato) >= DATE('{filters.get ('startdato', DEFAULT_STARTDATE.isoformat ())}')"]
-        if filters.get ('produsent'): where_clauses.append (f"produsent = '{filters['produsent']}'")
-        if filters.get ('modell'): where_clauses.append (f"modell = '{filters['modell'].replace (\"'\", \"''\")}'")
-        if filters.get('modell_sok'): where_clauses.append(f"
-        LOWER (overskrift)
-        LIKE
-        '%{filters['
-        modell_sok
-        '].lower().replace(\"'\", \"''\")}%'")
-        if filters.get ('seller_sok'): where_clauses.append (
-            f"LOWER(selger) LIKE '%{filters['seller_sok'].lower ().replace (\"'\", \"''\")}%'")
-            if filters.get('range_min'): where_clauses.append(f"
-        rekkevidde_str >= {int (filters['range_min'])}
-        ")
-        if filters.get ('range_max'): where_clauses.append (f"rekkevidde_str <= {int (filters['range_max'])}")
+        where_clauses = []
+
+        # Bruk en trygg startdato
+        start_dato = filters.get ('startdato', DEFAULT_STARTDATE.isoformat ())
+        where_clauses.append (f"date(dato) >= DATE('{start_dato}')")
+
+        # Håndter filtre med 'safe get' for å unngå feil hvis de mangler
+        if filters.get ('produsent'):
+            where_clauses.append (f"produsent = '{filters['produsent']}'")
+
+        if filters.get ('modell'):
+            # Korrekt og sikker måte å håndtere anførselstegn i SQL
+            safe_modell = filters['modell'].replace ("'", "''")
+            where_clauses.append (f"modell = '{safe_modell}'")
+
+        if filters.get ('modell_sok'):
+            safe_sok = filters['modell_sok'].lower ().replace ("'", "''")
+            where_clauses.append (f"LOWER(overskrift) LIKE '%{safe_sok}%'")
+
+        if filters.get ('seller_sok'):
+            safe_sok = filters['seller_sok'].lower ().replace ("'", "''")
+            where_clauses.append (f"LOWER(selger) LIKE '%{safe_sok}%'")
+
+        if filters.get ('range_min'):
+            where_clauses.append (f"rekkevidde_str >= {int (filters['range_min'])}")
+
+        if filters.get ('range_max'):
+            where_clauses.append (f"rekkevidde_str <= {int (filters['range_max'])}")
 
         query = f"SELECT * FROM database_biler_parquet WHERE {' AND '.join (where_clauses)}"
+
+        print (f"Kjører Athena-spørring: {query}")
         df = wr.athena.read_sql_query (sql=query, database=ATHENA_DATABASE,
                                        s3_output=f"s3://{S3_BUCKET_NAME}/athena-results/")
 
-        if df.empty:
-            return jsonify ({'historikk': [], 'daily_stats': []})
+        if df.empty: return jsonify ({'historikk': [], 'daily_stats': []})
         df.columns = [c.lower () for c in df.columns]
 
-        # --- Post-filtrering i Pandas (fra din gamle logikk) ---
+        # --- Post-filtrering i Pandas ---
         if filters.get ('drivstoff'): df = df[df['drivstoff'].isin (filters['drivstoff'])]
         if filters.get ('hjuldrift'): df = df[df['hjuldrift'].isin (filters['hjuldrift'])]
         if filters.get ('year_min'): df = df[df['årstall'] >= int (filters['year_min'])]
@@ -192,7 +206,6 @@ def get_bil_data():
     except Exception as e:
         print (f"Feil i /get_bil_data: {e}")
         return jsonify ({"error": str (e)}), 500
-
 
 if __name__ == '__main__':
     app.run (debug=True)
