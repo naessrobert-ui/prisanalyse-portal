@@ -60,15 +60,21 @@
         <h1>Prisanalyse</h1>
         <p>Velg en tjeneste for å starte analysen</p>
         <div class="service-selection">
-            <!-- VIKTIG: Endre disse URL-ene når du har satt opp subdomenene på Render -->
-            <a href="https://bolig.prisanalyse.no" class="service-card">
+
+            <!--
+            HER ER ENDRINGEN:
+            href-attributtene er endret fra fulle URL-er
+            til interne stier som matcher rutene i app.py.
+            -->
+            <a href="/bolig" class="service-card">
                 <h2>Bolig</h2>
                 <p>Analyser og visualiser boligpriser i hele Norge.</p>
             </a>
-            <a href="https://cars-akn3.onrender.com" class="service-card">
+            <a href="/bil" class="service-card">
                 <h2>Bil</h2>
                 <p>Analyser og søk i bruktbilmarkedet.</p>
             </a>
+
         </div>
     </div>
 </body>
