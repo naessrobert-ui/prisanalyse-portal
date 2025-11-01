@@ -6,156 +6,292 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
-        body { padding: 1rem; background-color: #f8f9fa; }
-        label { font-weight: bold; margin-bottom: 0.5rem; display: block; }
-        .card-header { font-weight: bold; }
-        #output-bil-tabell { font-size: 0.8rem; }
-        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.7); display: none; align-items: center; justify-content: center; z-index: 1000; }
-        .form-control, .form-select { font-size: 0.9rem; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background-color: #f8f9fa; }
+        .page-container { position: relative; }
+        .landing-background { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url('https://images.unsplash.com/photo-1553440569-bcc63803a83d?q=80&w=2025') no-repeat center center; background-size: cover; z-index: -1; transition: opacity 0.5s ease-in-out; }
+        .filter-container { transition: all 0.5s ease-in-out; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .filter-box { background: rgba(255, 255, 255, 0.98); color: #333; padding: 30px; border-radius: 12px; max-width: 1000px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.15); text-align: left; }
+        .filter-container.results-active { min-height: auto; padding: 1rem; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 1020; }
+        .filter-container.results-active .filter-box { max-width: 1200px; padding: 1rem; box-shadow: none; }
+        .filter-container.results-active .main-title, .filter-container.results-active .main-subtitle { display: none; }
+        .results-container { display: none; padding: 2rem 1rem; }
+        label { font-weight: bold; margin-bottom: 0.5rem; display: block; font-size: 0.9rem; }
+        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.8); display: none; align-items: center; justify-content: center; z-index: 10000; }
+        #home-btn { position: fixed; top: 20px; left: 20px; z-index: 1030; }
+        th[data-sort] { cursor: pointer; user-select: none; }
+        th[data-sort]:hover { background-color: #e9ecef; }
+        th[data-sort].sort-asc::after { content: ' ▲'; font-size: 0.8em; }
+        th[data-sort].sort-desc::after { content: ' ▼'; font-size: 0.8em; }
+        .dropdown-menu { max-height: 200px; overflow-y: auto; }
+        .dropdown-item { padding: .25rem 1rem; }
+        .dropdown-item .form-check-input { margin-right: 10px; cursor: pointer; }
+        .dropdown-item label { cursor: pointer; }
     </style>
 </head>
 <body>
-    <div class="loading-overlay" id="loading-spinner"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laster...</span></div></div>
+<div class="page-container">
+    <div class="loading-overlay" id="loading-spinner"><div class="spinner-border text-primary" role="status"></div></div>
+    <a href="/" id="home-btn" class="btn btn-secondary">← Tilbake til forsiden</a>
+    <div class="landing-background" id="landing-bg"></div>
 
-    <div class="container-fluid">
-        <a href="/" class="btn btn-secondary mb-3">← Tilbake til forsiden</a>
-        <h1 class="text-center my-4">{{ tittel }}</h1>
-
-        <div class="alert alert-info">
-            <h4 class="alert-heading">Velkommen!</h4>
-            <p class="mb-0">1. Velg <strong>forhåndsfiltre</strong> for å definere ditt søk (dette henter data fra databasen).<br>
-            2. Klikk <strong>"Last inn data"</strong>.<br>
-            3. Bruk <strong>visningsfiltrene</strong> (kommer snart) for å utforske resultatene interaktivt.</p>
-        </div>
-
-        <h4>1. Forhåndsfiltrer data fra databasen</h4>
-        <div class="card mb-4">
-            <div class="card-body">
-                <div class="row g-3 mb-3">
-                    <div class="col-md-2"><label for="dropdown-produsent">Produsent</label><select id="dropdown-produsent" class="form-select"><option value="">Alle</option>{% for p in produsenter %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
-                    <div class="col-md-2"><label for="dropdown-modell">Modell</label><select id="dropdown-modell" class="form-select" disabled><option value="">Velg produsent først</option></select></div>
-                    <div class="col-md-2"><label for="input-startdato">Startdato</label><input type="date" id="input-startdato" class="form-control" value="2025-05-01"></div>
-                    <div class="col-md-3"><label for="prefilt-drivstoff">Drivstoff</label><select id="prefilt-drivstoff" class="form-select" multiple>{% for d in drivstoff_opts %}<option value="{{ d }}">{{ d }}</option>{% endfor %}</select></div>
-                    <div class="col-md-3"><label for="prefilt-hjuldrift">Hjuldrift</label><select id="prefilt-hjuldrift" class="form-select" multiple>{% for h in hjuldrift_opts %}<option value="{{ h }}">{{ h }}</option>{% endfor %}</select></div>
-                </div>
-                <div class="row g-3 mb-3">
-                    <div class="col-md-2"><label>Årstall</label><div class="input-group"><input type="number" id="prefilt-year-fra" class="form-control" placeholder="{{ year_min }}"><input type="number" id="prefilt-year-til" class="form-control" placeholder="{{ year_max }}"></div></div>
-                    <div class="col-md-2"><label>Kjørelengde</label><div class="input-group"><input type="number" id="prefilt-km-fra" class="form-control" placeholder="{{ km_min }}"><input type="number" id="prefilt-km-til" class="form-control" placeholder="{{ km_max }}"></div></div>
-                    <div class="col-md-2"><label>Rekkevidde</label><div class="input-group"><input type="number" id="prefilt-range-fra" class="form-control" placeholder="0"><input type="number" id="prefilt-range-til" class="form-control" placeholder="800"></div></div>
-                    <div class="col-md-3"><label for="prefilt-modell-sok">Søk i tittel</label><input type="text" id="prefilt-modell-sok" placeholder="F.eks. hengerfeste..." class="form-control"></div>
-                    <div class="col-md-3"><label for="prefilt-seller-sok">Selger</label><input type="text" id="prefilt-seller-sok" placeholder="F.eks. Møller..." class="form-control"></div>
-                </div>
-                <div class="row"><div class="col-md-4"><button id="load-data-button" class="btn btn-primary btn-lg w-100">Last inn data</button></div><div class="col-md-8 align-self-center"><p id="loading-output" class="text-muted mb-0"></p></div></div>
+    <div id="filter-container" class="filter-container">
+        <div class="filter-box">
+            <h1 class="text-center mb-2 main-title">{{ tittel }}</h1>
+            <p class="text-center text-muted mb-4 main-subtitle">Definer et utvalg for å starte analysen</p>
+            <div class="row g-3 mb-3">
+                <div class="col-md-auto"><label for="dropdown-produsent">Produsent</label><select id="dropdown-produsent" class="form-select"><option value="">Alle</option>{% for p in produsenter %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
+                <div class="col-md-auto"><label for="dropdown-modell">Modell</label><select id="dropdown-modell" class="form-select" disabled><option value="">Velg produsent først</option></select></div>
+                <div class="col-md-auto"><label for="input-startdato">Startdato</label><input type="date" id="input-startdato" class="form-control" value="2025-06-01"></div>
+                <div class="col-md-auto"><label>Pris</label><div class="input-group"><input type="number" id="prefilt-pris-fra" class="form-control" placeholder="Fra"><input type="number" id="prefilt-pris-til" class="form-control" placeholder="Til"></div></div>
+                <div class="col-md-auto"><label>Drivstoff</label><div class="dropdown"><button class="btn btn-outline-secondary dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" aria-expanded="false">Velg...</button><ul class="dropdown-menu" id="prefilt-drivstoff">{% for d in drivstoff_opts %}<li><a class="dropdown-item" href="#"><label><input class="form-check-input" type="checkbox" value="{{ d }}"> {{ d }}</label></a></li>{% endfor %}</ul></div></div>
+                <div class="col-md-auto"><label>Hjuldrift</label><div class="dropdown"><button class="btn btn-outline-secondary dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" aria-expanded="false">Velg...</button><ul class="dropdown-menu" id="prefilt-hjuldrift">{% for h in hjuldrift_opts %}<li><a class="dropdown-item" href="#"><label><input class="form-check-input" type="checkbox" value="{{ h }}"> {{ h }}</label></a></li>{% endfor %}</ul></div></div>
+                <div class="col-md-auto flex-grow-1 text-end align-self-end"><button id="load-data-button" class="btn btn-primary btn-lg px-5">Start analyse</button></div>
             </div>
-        </div>
-
-        <div id="results-section" style="display: none;">
-            <hr class="my-4"><h2 class="text-center mb-3">Aggregert statistikk</h2>
-            <div class="row justify-content-center mb-4" id="kpi-output"></div>
-            <div class="row"><div class="col-md-6"><div id="price-line-chart"></div></div><div class="col-md-6"><div id="sold-bar-chart"></div></div></div>
-            <hr class="my-4"><h2 class="text-center mb-3">Resultater</h2>
-            <p id="antall-biler-funnet" class="text-center fw-bold fs-5 mb-3"></p>
-            <div id="output-bil-tabell" class="table-responsive"></div>
+            <div class="row g-3 mb-2">
+                <div class="col-md-2"><label>Årstall</label><div class="input-group"><input type="number" id="prefilt-year-fra" class="form-control" placeholder="{{ year_min }}"><input type="number" id="prefilt-year-til" class="form-control" placeholder="{{ year_max }}"></div></div>
+                <div class="col-md-2"><label>Kjørelengde</label><div class="input-group"><input type="number" id="prefilt-km-fra" class="form-control" placeholder="{{ km_min }}"><input type="number" id="prefilt-km-til" class="form-control" placeholder="{{ km_max }}"></div></div>
+                <div class="col-md-2"><label>Rekkevidde</label><div class="input-group"><input type="number" id="prefilt-range-fra" class="form-control" placeholder="Fra"><input type="number" id="prefilt-range-til" class="form-control" placeholder="Til"></div></div>
+                <div class="col-md-3"><label for="prefilt-modell-sok">Søk i tittel</label><input type="text" id="prefilt-modell-sok" placeholder="F.eks. hengerfeste..." class="form-control"></div>
+                <div class="col-md-3"><label for="prefilt-seller-sok">Selger</label><input type="text" id="prefilt-seller-sok" placeholder="F.eks. Møller..." class="form-control"></div>
+            </div>
+            <p id="loading-output" class="text-muted mt-2 mb-0 text-center"></p>
         </div>
     </div>
 
-    <script id="models-by-prod-data" type="application/json">{{ models_by_prod | safe }}</script>
+    <div id="results-view" class="container-fluid results-container"></div>
+</div>
+<script id="models-by-prod-data" type="application/json">{{ models_by_prod | safe }}</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        let fullCarData = [], fullDailyStats = [], fullKpis = {};
+        let sortState = { key: 'pris_last', direction: 'asc' };
+        const modelsByProd = JSON.parse(document.getElementById('models-by-prod-data').textContent);
+        const getEl = id => document.getElementById(id);
+        const filterContainer = getEl('filter-container'), resultsView = getEl('results-view'), landingBg = getEl('landing-bg');
 
-    <script>
-        document.addEventListener('DOMContentLoaded', (event) => {
-            const modelsByProd = JSON.parse(document.getElementById('models-by-prod-data').textContent);
+        ['prefilt-drivstoff', 'prefilt-hjuldrift'].forEach(id => getEl(id).addEventListener('click', e => e.stopPropagation()));
 
-            const produsentDropdown = document.getElementById('dropdown-produsent');
-            const modellDropdown = document.getElementById('dropdown-modell');
-            const loadButton = document.getElementById('load-data-button');
-
-            produsentDropdown.addEventListener('change', function() {
-                modellDropdown.innerHTML = '<option value="">Alle</option>';
-                const selectedProdusent = this.value;
-                if (selectedProdusent && modelsByProd[selectedProdusent]) {
-                    modelsByProd[selectedProdusent].forEach(m => modellDropdown.add(new Option(m, m)));
-                    modellDropdown.disabled = false;
-                } else {
-                    modellDropdown.disabled = true;
-                    modellDropdown.innerHTML = '<option value="">Velg produsent først</option>';
-                }
-            });
-
-            loadButton.addEventListener('click', async () => {
-                const getVal = id => { const el = document.getElementById(id); return el ? el.value : null; }
-                const getMultiVal = id => { const el = document.getElementById(id); return el ? Array.from(el.selectedOptions).map(o => o.value) : []; }
-
-                const filters = {
-                    produsent: getVal('dropdown-produsent'), modell: getVal('dropdown-modell'),
-                    startdato: getVal('input-startdato'), drivstoff: getMultiVal('prefilt-drivstoff'),
-                    hjuldrift: getMultiVal('prefilt-hjuldrift'), year_min: getVal('prefilt-year-fra'),
-                    year_max: getVal('prefilt-year-til'), km_min: getVal('prefilt-km-fra'),
-                    km_max: getVal('prefilt-km-til'), range_min: getVal('prefilt-range-fra'),
-                    range_max: getVal('prefilt-range-til'), modell_sok: getVal('prefilt-modell-sok'),
-                    seller_sok: getVal('prefilt-seller-sok'),
-                };
-
-                document.getElementById('loading-spinner').style.display = 'flex';
-                document.getElementById('loading-output').textContent = 'Kjører spørring mot Athena... Dette kan ta litt tid.';
-                document.getElementById('results-section').style.display = 'none';
-
-                try {
-                    const response = await fetch('{{ data_url }}', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ filters: Object.fromEntries(Object.entries(filters).filter(([_, v]) => v != null && v !== '')) })
-                    });
-                    if (!response.ok) { const err = await response.json(); throw new Error(err.error || `Serverfeil: ${response.status}`); }
-
-                    const data = await response.json();
-                    const fullCarData = data.historikk || [];
-                    const fullDailyStats = data.daily_stats || [];
-
-                    document.getElementById('loading-output').textContent = `Lastet inn ${fullCarData.length} bilhistorikker.`;
-                    document.getElementById('results-section').style.display = 'block';
-                    updateVisuals(fullCarData, fullDailyStats);
-                } catch (error) {
-                    console.error("Feil:", error);
-                    document.getElementById('loading-output').innerHTML = `<span class="text-danger">Feil: ${error.message}</span>`;
-                } finally {
-                    document.getElementById('loading-spinner').style.display = 'none';
-                }
-            });
-
-            function updateVisuals(carData, statsData) {
-                updateKPIs(statsData);
-                updateGraphs(statsData);
-                updateTable(carData);
-            }
-
-            function updateKPIs(statsData) { /* ... (funksjonen er uendret) ... */ }
-            function updateGraphs(statsData) { /* ... (funksjonen er uendret) ... */ }
-
-            function updateTable(carData) {
-                document.getElementById('antall-biler-funnet').textContent = `Antall biler i utvalget: ${carData.length}`;
-                const container = document.getElementById('output-bil-tabell');
-                container.innerHTML = '';
-                if (carData.length === 0) { container.innerHTML = '<div class="alert alert-warning">Ingen biler i utvalget.</div>'; return; }
-
-                const table = document.createElement('table'); table.className = 'table table-striped table-sm table-hover';
-                const thead = table.createTHead(); thead.innerHTML = `<tr><th>FINN-kode</th><th>Overskrift</th><th>År</th><th>Km</th><th>Rekkevidde</th><th>Pris</th><th>Prisfall</th><th>Dager</th><th>Drivstoff</th><th>Selger</th></tr>`;
-
-                const tbody = table.createTBody();
-                carData.slice(0, 500).forEach(item => { // Begrenser til 500 rader for ytelse
-                    const row = tbody.insertRow();
-                    row.insertCell().innerHTML = `<a href="https://www.finn.no/car/used/ad.html?finnkode=${item.finnkode}" target="_blank">${item.finnkode}</a>`;
-                    row.insertCell().textContent = item.overskrift;
-                    row.insertCell().textContent = item.årstall;
-                    row.insertCell().textContent = item.kjørelengde ? item.kjørelengde.toLocaleString('nb-NO') : '';
-                    row.insertCell().textContent = item.rekkevidde;
-                    row.insertCell().textContent = item.pris_last ? item.pris_last.toLocaleString('nb-NO') : 'Solgt';
-                    row.insertCell().textContent = item.prisfall ? item.prisfall.toLocaleString('nb-NO') : '';
-                    row.insertCell().textContent = item.dager;
-                    row.insertCell().textContent = item.drivstoff;
-                    row.insertCell().textContent = item.selger;
-                });
-                container.appendChild(table);
+        getEl('dropdown-produsent').addEventListener('change', function() {
+            const modellDropdown = getEl('dropdown-modell');
+            modellDropdown.innerHTML = '<option value="">Alle</option>';
+            const selected = this.value;
+            if (selected && modelsByProd[selected]) {
+                modelsByProd[selected].forEach(m => modellDropdown.add(new Option(m, m)));
+                modellDropdown.disabled = false;
+            } else {
+                modellDropdown.disabled = true;
+                modellDropdown.innerHTML = '<option value="">Velg produsent først</option>';
             }
         });
-    </script>
+
+        getEl('load-data-button').addEventListener('click', async () => {
+            const getCheckboxVals = id => Array.from(getEl(id).querySelectorAll('input:checked')).map(cb => cb.value);
+            const filters = {
+                produsent: getEl('dropdown-produsent').value, modell: getEl('dropdown-modell').value,
+                startdato: getEl('input-startdato').value, drivstoff: getCheckboxVals('prefilt-drivstoff'),
+                hjuldrift: getCheckboxVals('prefilt-hjuldrift'), year_min: getEl('prefilt-year-fra').value,
+                year_max: getEl('prefilt-year-til').value, km_min: getEl('prefilt-km-fra').value,
+                km_max: getEl('prefilt-km-til').value, range_min: getEl('prefilt-range-fra').value,
+                range_max: getEl('prefilt-range-til').value, pris_min: getEl('prefilt-pris-fra').value,
+                pris_max: getEl('prefilt-pris-til').value, modell_sok: getEl('prefilt-modell-sok').value,
+                seller_sok: getEl('prefilt-seller-sok').value,
+            };
+
+            getEl('loading-spinner').style.display = 'flex';
+            getEl('loading-output').textContent = 'Kjører spørring mot Athena...';
+            try {
+                const response = await fetch('{{ data_url }}', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filters: Object.fromEntries(Object.entries(filters).filter(([_, v]) => v && v.length !== 0)) })
+                });
+                if (!response.ok) { const err = await response.json(); throw new Error(err.error || `Serverfeil: ${response.status}`); }
+
+                const data = await response.json();
+                fullCarData = data.historikk || [];
+                fullDailyStats = data.daily_stats || [];
+                fullKpis = data.kpis || {};
+
+                landingBg.style.opacity = '0';
+                filterContainer.classList.add('results-active');
+                getEl('load-data-button').textContent = 'Oppdater søk';
+                resultsView.style.display = 'block';
+
+                buildResultsView(fullCarData, fullDailyStats);
+            } catch (error) {
+                console.error("Feil:", error);
+                getEl('loading-output').innerHTML = `<span class="text-danger">Feil: ${error.message}</span>`;
+            } finally {
+                getEl('loading-spinner').style.display = 'none';
+            }
+        });
+
+        function buildResultsView(carData, statsData) {
+            resultsView.innerHTML = `
+                <h2 class="text-center mb-3">Aggregert statistikk</h2>
+                <div class="row justify-content-center mb-4" id="kpi-output"></div>
+                <div class="row"><div class="col-lg-6 mb-4"><div id="price-line-chart"></div></div><div class="col-lg-6 mb-4"><div id="sold-bar-chart"></div></div></div>
+                <hr class="my-4"><h2 class="text-center mb-3">2. Utforsk resultater</h2>
+                <div class="card mb-4"><div class="card-header">Visningsfiltre</div><div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-2"><label>Drivstoff</label><div class="dropdown"><button class="btn btn-outline-secondary dropdown-toggle w-100 text-start" type="button" data-bs-toggle="dropdown">Velg...</button><ul class="dropdown-menu w-100" id="res-drivstoff"></ul></div></div>
+                        <div class="col-md-2"><label>Hjuldrift</label><div class="dropdown"><button class="btn btn-outline-secondary dropdown-toggle w-100 text-start" type="button" data-bs-toggle="dropdown">Velg...</button><ul class="dropdown-menu w-100" id="res-hjuldrift"></ul></div></div>
+                        <div class="col-md-2"><label>Årstall</label><div class="input-group"><input type="number" id="res-year-fra" class="form-control" placeholder="Fra"><input type="number" id="res-year-til" class="form-control" placeholder="Til"></div></div>
+                        <div class="col-md-6"><label for="res-seller-sok">Søk i selger</label><input type="text" id="res-seller-sok" class="form-control" placeholder="F.eks. Møller..."></div>
+                    </div>
+                </div></div>
+                <p id="antall-biler-funnet" class="text-center fw-bold fs-5 mb-3"></p>
+                <div id="output-bil-tabell" class="table-responsive"></div>
+            `;
+            setupResultFilters(carData);
+            updateVisuals();
+        }
+
+        function setupResultFilters(carData) {
+            const drivstoffOpts = [...new Set(carData.map(d => d.drivstoff).filter(Boolean))].sort();
+            const hjuldriftOpts = [...new Set(carData.map(d => d.hjuldrift).filter(Boolean))].sort();
+
+            const drivstoffMenu = getEl('res-drivstoff');
+            drivstoffMenu.innerHTML = '';
+            drivstoffOpts.forEach(opt => { drivstoffMenu.innerHTML += `<li><a class="dropdown-item" href="#"><label><input class="form-check-input" type="checkbox" value="${opt}"> ${opt}</label></a></li>`; });
+
+            const hjuldriftMenu = getEl('res-hjuldrift');
+            hjuldriftMenu.innerHTML = '';
+            hjuldriftOpts.forEach(opt => { hjuldriftMenu.innerHTML += `<li><a class="dropdown-item" href="#"><label><input class="form-check-input" type="checkbox" value="${opt}"> ${opt}</label></a></li>`; });
+
+            drivstoffMenu.addEventListener('click', e => e.stopPropagation());
+            hjuldriftMenu.addEventListener('click', e => e.stopPropagation());
+
+            document.querySelectorAll('#results-view input, #results-view .dropdown-menu').forEach(el => {
+                const handler = () => setTimeout(updateVisuals, 0);
+                el.addEventListener('input', handler);
+                el.addEventListener('change', handler);
+            });
+        }
+
+        function updateVisuals() {
+            let filteredData = [...fullCarData];
+            const getCheckboxVals = id => Array.from(getEl(id).querySelectorAll('input:checked')).map(cb => cb.value);
+
+            const drivstoffFilter = getCheckboxVals('res-drivstoff');
+            if (drivstoffFilter.length) filteredData = filteredData.filter(d => d.drivstoff && drivstoffFilter.includes(d.drivstoff));
+            const hjuldriftFilter = getCheckboxVals('res-hjuldrift');
+            if (hjuldriftFilter.length) filteredData = filteredData.filter(d => d.hjuldrift && hjuldriftFilter.includes(d.hjuldrift));
+            const yearFra = getEl('res-year-fra').value; if (yearFra) filteredData = filteredData.filter(d => d.årstall >= parseInt(yearFra));
+            const yearTil = getEl('res-year-til').value; if (yearTil) filteredData = filteredData.filter(d => d.årstall <= parseInt(yearTil));
+            const sellerSok = getEl('res-seller-sok').value.toLowerCase();
+            if (sellerSok) filteredData = filteredData.filter(d => d.selger && d.selger.toLowerCase().includes(sellerSok));
+
+            const { key, direction } = sortState;
+            filteredData.sort((a, b) => {
+                const valA = a[key], valB = b[key]; if (valA == null) return 1; if (valB == null) return -1;
+                let comp = (typeof valA === 'string') ? valA.localeCompare(valB, 'nb') : valA - valB;
+                return direction === 'asc' ? comp : -comp;
+            });
+
+            updateKPIs(fullKpis);
+            updateGraphs(fullDailyStats);
+            updateTable(filteredData);
+        }
+
+function updateKPIs(kpiData) {
+                const container = getEl('kpi-output');
+                container.innerHTML = ''; // Tømmer gammelt innhold
+
+                // Formateringshjelper for å vise tall pent
+                const formatNumber = (num) => (num != null) ? Math.round(num).toLocaleString('nb-NO') : 'N/A';
+                const formatKr = (num) => (num != null) ? Math.round(num).toLocaleString('nb-NO') + ' kr' : 'N/A';
+
+                // Bygg HTML for ALLE KPI-kortene
+                container.innerHTML = `
+                    <div class="col-md-auto mb-3">
+                        <div class="card text-center h-100">
+                            <div class="card-header">Gj.snitt dager til salgs</div>
+                            <div class="card-body d-flex align-items-center justify-content-center">
+                                <h4 class="card-title">${formatNumber(kpiData.avg_dager)}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-auto mb-3">
+                        <div class="card text-center h-100">
+                            <div class="card-header">Median dager til salgs</div>
+                            <div class="card-body d-flex align-items-center justify-content-center">
+                                <h4 class="card-title">${formatNumber(kpiData.median_dager)}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-auto mb-3">
+                        <div class="card text-center h-100">
+                            <div class="card-header">Gj.snittspris</div>
+                            <div class="card-body d-flex align-items-center justify-content-center">
+                                <h4 class="card-title">${formatKr(kpiData.avg_pris)}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-auto mb-3">
+                        <div class="card text-center h-100">
+                            <div class="card-header">Medianpris</div>
+                            <div class="card-body d-flex align-items-center justify-content-center">
+                                <h4 class="card-title">${formatKr(kpiData.median_pris)}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-auto mb-3">
+                        <div class="card text-center h-100">
+                            <div class="card-header">Laveste pris</div>
+                            <div class="card-body d-flex align-items-center justify-content-center">
+                                <h4 class="card-title">${formatKr(kpiData.laveste_pris)}</h4>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        function updateGraphs(statsData) {
+            const pDiv = getEl('price-line-chart'), sDiv = getEl('sold-bar-chart');
+            Plotly.purge(pDiv); Plotly.purge(sDiv); if (!statsData || statsData.length === 0) return;
+            statsData.sort((a, b) => new Date(a.Dato) - new Date(b.Dato));
+            const dates = statsData.map(d => d.Dato), prices = statsData.map(d => d.Median_Pris_Usolgt), sold = statsData.map(d => d.Antall_Solgt);
+            Plotly.newPlot(pDiv, [{ x: dates, y: prices, mode: 'lines+markers' }], { title: 'Medianpris over tid', yaxis: { tickformat: ',.0f' }, margin: { l: 70, r: 20, b: 40, t: 40 } });
+            Plotly.newPlot(sDiv, [{ x: dates, y: sold, type: 'bar' }], { title: 'Antall solgte per dag', margin: { l: 70, r: 20, b: 40, t: 40 } });
+        }
+
+        function updateTable(carData) {
+            getEl('antall-biler-funnet').textContent = `Antall biler i utvalget: ${carData.length}`;
+            const container = getEl('output-bil-tabell'); container.innerHTML = '';
+            if (carData.length === 0) { container.innerHTML = '<div class="alert alert-warning">Ingen biler passer.</div>'; return; }
+            const table = document.createElement('table'); table.className = 'table table-striped table-sm table-hover';
+            const thead = table.createTHead();
+            thead.innerHTML = `<tr><th data-sort="finnkode">FINN-kode</th><th data-sort="produsent">Produsent</th><th data-sort="modell">Modell</th><th data-sort="overskrift">Informasjon</th><th data-sort="årstall">År</th><th data-sort="kjørelengde">Km</th><th data-sort="rekkevidde">Rekkevidde</th><th data-sort="pris_last">Pris</th><th data-sort="dager">Dager</th><th data-sort="dato_end">Siste dato</th><th data-sort="selger">Selger</th></tr>`;
+            thead.querySelectorAll('th[data-sort]').forEach(th => {
+                if (th.dataset.sort === sortState.key) th.classList.add(sortState.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                th.addEventListener('click', () => {
+                    const newKey = th.dataset.sort;
+                    if (sortState.key === newKey) { sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'; }
+                    else { sortState.key = newKey; sortState.direction = 'asc'; }
+                    updateVisuals();
+                });
+            });
+            const tbody = table.createTBody();
+            carData.slice(0, 500).forEach(item => {
+                const row = tbody.insertRow();
+                let formattedDate = '';
+                if (item.dato_end) {
+                    const d = new Date(item.dato_end);
+                    formattedDate = `${d.getDate()}. ${d.toLocaleString('nb-NO', { month: 'short' })} ${d.getFullYear().toString().slice(-2)}`;
+                }
+                row.insertCell().innerHTML = `<a href="https://www.finn.no/car/used/ad.html?finnkode=${item.finnkode}" target="_blank">${item.finnkode}</a>`;
+                row.insertCell().textContent = item.produsent; row.insertCell().textContent = item.modell;
+                row.insertCell().textContent = item.overskrift;
+                row.insertCell().textContent = item.årstall; row.insertCell().textContent = item.kjørelengde ? item.kjørelengde.toLocaleString('nb-NO') : '';
+                row.insertCell().textContent = item.rekkevidde;
+                row.insertCell().textContent = item.pris_last ? item.pris_last.toLocaleString('nb-NO') : 'Solgt';
+                row.insertCell().textContent = item.dager;
+                row.insertCell().textContent = formattedDate;
+                row.insertCell().textContent = item.selger;
+            });
+            container.appendChild(table);
+        }
+    });
+</script>
 </body>
 </html>

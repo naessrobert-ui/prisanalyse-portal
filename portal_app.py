@@ -9,21 +9,20 @@ from flask import Flask, render_template, jsonify, request
 import boto3
 from botocore.exceptions import ClientError
 import awswrangler as wr
+import numpy as np
 
 # --- Konfigurasjon ---
 app = Flask (__name__)
 
-# Les alle konfigurasjonsverdier fra miljøvariabler
 AWS_KEY = os.environ.get ('AWS_ACCESS_KEY_ID')
 AWS_SECRET = os.environ.get ('AWS_SECRET_ACCESS_KEY')
 AWS_REGION = os.environ.get ('AWS_REGION')
 S3_BUCKET_NAME = os.environ.get ('S3_BUCKET_NAME', 'prisanalyse-data')
 ATHENA_DATABASE = os.environ.get ('ATHENA_DATABASE', 'bil_finn_daglig')
-DEFAULT_STARTDATE = date (2025, 5, 1)
+DEFAULT_STARTDATE = date (2025, 6, 1)
 
 if not all ([AWS_KEY, AWS_SECRET, AWS_REGION]):
-    print (
-        "ADVARSEL: Kritiske AWS-miljøvariabler mangler (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION). Appen vil sannsynligvis feile.")
+    print ("ADVARSEL: Kritiske AWS-miljøvariabler mangler.")
 
 
 # --- Hjelpefunksjoner ---
@@ -73,8 +72,6 @@ def bolig_analyse_side():
     except Exception as e:
         print (f"Feil under forberedelse av bolig-filtre: {e}")
         filter_data = {'fylker': [], 'boligtyper': [], 'meglere': [], 'annonsepakker': []}
-
-    # Utvider filter_data med ** for å pakke ut dictionaryen til nøkkelordargumenter
     return render_template ('analyse_template.html', tittel="Prisanalyse: Boliger for salg i Norge",
                             data_url="/get_bolig_data", **filter_data)
 
@@ -118,7 +115,6 @@ def get_bolig_data():
 
 @app.route('/bil')
 def bil_analyse_side():
-    """Viser den avanserte analysesiden for bil og henter metadata."""
     try:
         s3_client = boto3.client('s3', region_name=AWS_REGION, aws_access_key_id=AWS_KEY, aws_secret_access_key=AWS_SECRET)
         meta_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key='calc/metadata.json')
@@ -127,20 +123,22 @@ def bil_analyse_side():
         print(f"ADVARSEL: Kunne ikke laste metadata for bil. Feil: {e}")
         metadata = {}
 
-    # ENDRING: Vi sender nå hver variabel eksplisitt i stedet for å bruke **metadata
+    # --- KORREKSJON HER ---
+    # Vi sender hver variabel eksplisitt for å unngå feil med JSON-objektet.
     return render_template(
         'bil_analyse_template.html',
         tittel="Analyse av bruktbilmarkedet",
         data_url="/get_bil_data",
         produsenter=metadata.get('produsenter', []),
+        models_by_prod=json.dumps(metadata.get('models_by_prod', {})), # Sendes som en JSON-streng
         drivstoff_opts=metadata.get('drivstoff_opts', []),
         hjuldrift_opts=metadata.get('hjuldrift_opts', []),
-        models_by_prod=json.dumps(metadata.get('models_by_prod', {})),
         year_min=metadata.get('year_min', 2000),
         year_max=metadata.get('year_max', date.today().year),
         km_min=metadata.get('km_min', 0),
-        km_max=metadata.get('km_max', 300000)
+        km_max=metadata.get('km_max', 200000)
     )
+
 
 @app.route ('/get_bil_data', methods=['POST'])
 def get_bil_data():
@@ -149,34 +147,34 @@ def get_bil_data():
         filters = request.get_json ().get ('filters', {})
 
         where_clauses = [f"date(dato) >= DATE('{filters.get ('startdato', DEFAULT_STARTDATE.isoformat ())}')"]
-        # DENNE BLOKKEN ER KORREKT OG REN
+
+        # --- KORRIGERT OG SIKKER SYNTAKS ---
         if filters.get ('produsent'):
             where_clauses.append (f"produsent = '{filters['produsent']}'")
-
         if filters.get ('modell'):
             safe_modell = filters['modell'].replace ("'", "''")
             where_clauses.append (f"modell = '{safe_modell}'")
-
         if filters.get ('modell_sok'):
             safe_sok = filters['modell_sok'].lower ().replace ("'", "''")
             where_clauses.append (f"LOWER(overskrift) LIKE '%{safe_sok}%'")
-
         if filters.get ('seller_sok'):
             safe_sok = filters['seller_sok'].lower ().replace ("'", "''")
             where_clauses.append (f"LOWER(selger) LIKE '%{safe_sok}%'")
-
         if filters.get ('range_min'):
             where_clauses.append (f"rekkevidde_str >= {int (filters['range_min'])}")
-
         if filters.get ('range_max'):
             where_clauses.append (f"rekkevidde_str <= {int (filters['range_max'])}")
+        if filters.get ('pris_min'):
+            where_clauses.append (f"pris_num >= {int (filters['pris_min'])}")
+        if filters.get ('pris_max'):
+            where_clauses.append (f"pris_num <= {int (filters['pris_max'])}")
+        # --- SLUTT PÅ KORRIGERT SYNTAKS ---
 
         query = f"SELECT * FROM database_biler_parquet WHERE {' AND '.join (where_clauses)}"
         df = wr.athena.read_sql_query (sql=query, database=ATHENA_DATABASE,
                                        s3_output=f"s3://{S3_BUCKET_NAME}/athena-results/", boto3_session=my_session)
 
-        if df.empty:
-            return jsonify ({'historikk': [], 'daily_stats': []})
+        if df.empty: return jsonify ({'historikk': [], 'daily_stats': [], 'kpis': {}})
         df.columns = [c.lower () for c in df.columns]
 
         if filters.get ('drivstoff'): df = df[df['drivstoff'].isin (filters['drivstoff'])]
@@ -186,27 +184,39 @@ def get_bil_data():
         if filters.get ('km_min'): df = df[df['kjørelengde'] >= int (filters['km_min'])]
         if filters.get ('km_max'): df = df[df['kjørelengde'] <= int (filters['km_max'])]
 
-        if df.empty: return jsonify ({'historikk': [], 'daily_stats': []})
-
-        daily_stats_df = df.groupby ('dato').agg (Antall_Solgt=('pris_num', lambda x: (x == 0).sum ()),
-                                                  Median_Pris_Usolgt=(
-                                                  'pris_num', lambda x: x[x > 0].median ())).reset_index ()
-        daily_stats_df['Dato'] = pd.to_datetime (daily_stats_df['dato']).dt.strftime ('%Y-%m-%d')
-        daily_stats = json.loads (daily_stats_df.to_json (orient='records'))
+        if df.empty: return jsonify ({'historikk': [], 'daily_stats': [], 'kpis': {}})
 
         historikk_df = df.sort_values ('dato').groupby ('finnkode').agg (
-            overskrift=('overskrift', 'last'), årstall=('årstall', 'last'), kjørelengde=('kjørelengde', 'last'),
-            drivstoff=('drivstoff', 'last'), hjuldrift=('hjuldrift', 'last'), rekkevidde=('rekkevidde_str', 'last'),
-            selger=('selger', 'last'), dato_start=('dato', 'first'), dato_end=('dato', 'last'),
-            pris_start=('pris_num', 'first'),
+            produsent=('produsent', 'last'), modell=('modell', 'last'), overskrift=('overskrift', 'last'),
+            årstall=('årstall', 'last'), kjørelengde=('kjørelengde', 'last'), drivstoff=('drivstoff', 'last'),
+            hjuldrift=('hjuldrift', 'last'), rekkevidde=('rekkevidde_str', 'last'), selger=('selger', 'last'),
+            dato_start=('dato', 'first'), dato_end=('dato', 'last'), pris_start=('pris_num', 'first'),
             pris_last=('pris_num', lambda x: x[x > 0].iloc[-1] if not x[x > 0].empty else None)
         ).reset_index ()
         historikk_df['dager'] = (
                     pd.to_datetime (historikk_df['dato_end']) - pd.to_datetime (historikk_df['dato_start'])).dt.days
         historikk_df['prisfall'] = historikk_df['pris_last'] - historikk_df['pris_start']
-        historikk = json.loads (historikk_df.to_json (orient='records'))
 
-        return jsonify ({'historikk': historikk, 'daily_stats': daily_stats})
+        usolgte_biler = historikk_df[historikk_df['pris_last'] > 0]
+        kpis = {}
+        if not usolgte_biler.empty:
+            kpis = {
+                'avg_dager': int (usolgte_biler['dager'].mean ()),
+                'median_dager': int (usolgte_biler['dager'].median ()),
+                'avg_pris': int (usolgte_biler['pris_last'].mean ()),
+                'median_pris': int (usolgte_biler['pris_last'].median ()),
+                'laveste_pris': int (usolgte_biler['pris_last'].min ())
+            }
+
+        daily_stats_df = df.groupby ('dato').agg (Antall_Solgt=('pris_num', lambda x: (x == 0).sum ()),
+                                                  Median_Pris_Usolgt=(
+                                                  'pris_num', lambda x: x[x > 0].median ())).reset_index ()
+        daily_stats_df['Dato'] = pd.to_datetime (daily_stats_df['dato']).dt.strftime ('%Y-%m-%d')
+
+        daily_stats = json.loads (daily_stats_df.to_json (orient='records')) if not daily_stats_df.empty else []
+        historikk = json.loads (historikk_df.to_json (orient='records')) if not historikk_df.empty else []
+
+        return jsonify ({'historikk': historikk, 'daily_stats': daily_stats, 'kpis': kpis})
 
     except Exception as e:
         print (f"Feil i /get_bil_data: {e}")
